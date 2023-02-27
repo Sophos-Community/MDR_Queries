@@ -1,3 +1,7 @@
+/*
+To view a report you can take the ID information from this query and use "viewReportById" query to see the contents.
+*/
+
 -- List of Distinct Reports
 SELECT DISTINCT
    CAST(JSON_EXTRACT(raw, '$.ingest_date') AS VARCHAR) Ingest_Date,
