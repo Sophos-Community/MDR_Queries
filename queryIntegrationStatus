@@ -1,0 +1,20 @@
+-- Display Integration status
+-- NOTE if no data has reached central in the selected time period then the integration will not be listed
+
+-- VARIABLE $$Integration Category$$  STRING
+-- VARIABLE $$Vendor$$                STRING
+
+SELECT 
+   sensor_type Integration_Category,
+   CASE WHEN sensor_vendor = 'Sophos' THEN 'Sophos NDR' ELSE sensor_vendor END Vendor,
+   sensor_version Version,
+   COUNT(*) Records,
+   CAST(CAST(SUM(upload_size)/1024.0 AS DECIMAL(10,2)) AS VARCHAR)||'KB' Data_uploaded,
+   CAST(DATE_DIFF('hour',MAX(ioc_created_at), NOW()) AS VARCHAR)||' Hours ago' Last_Update,
+   ioc_worker_name,
+   sensor_id
+FROM mdr_ioc_all 
+WHERE LOWER(sensor_type) LIKE LOWER('%$$Integration Category$$%') 
+   AND LOWER(sensor_vendor) LIKE LOWER('%$$Vendor$$%')
+GROUP BY 1,2,3,7,8
+ORDER BY 1,2,3,7,8
