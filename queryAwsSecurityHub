@@ -1,0 +1,32 @@
+-- VARIABLE $$Sophos_Severity$$ STRING
+-- VARIABLE $$AWS_Severity is >= N$$ STRING
+-- VARIABLE $$Include CVE notifications (1 = True, 0 = False)$$ STRING
+-- VARIABLE $$AWS Type LIKE$$ STRING
+-- VARIABLE $$Include Software and Configuration (1 = True, 0 = False)$$ STRING
+
+SELECT
+   MAX(ioc_created_at) ioc_created_at,
+   -- ioc_worker_name,
+   -- ioc_detection_category,
+   ioc_severity Sophos_Severity,
+   CAST(JSON_EXTRACT(raw,'$.Severity.Normalized') AS VARCHAR) AS AWS_Severity,
+   CAST(JSON_EXTRACT(raw,'$.Title') AS VARCHAR) Title,
+   CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) Type,
+   CAST(JSON_EXTRACT(raw,'$.Description') AS VARCHAR) Description,
+   -- ioc_detection_description,
+   CAST(JSON_EXTRACT(raw,'$.AwsAccountId') AS VARCHAR) AS AWS_Account_ID,
+   CAST(JSON_EXTRACT(raw,'$.Resources[0].Id') AS VARCHAR) First_Resource,
+   MAX(raw) raw
+FROM mdr_ioc_all
+WHERE ioc_worker_name = 'Worker Public Cloud' 
+   AND CAST(ioc_severity AS VARCHAR) LIKE '$$Sophos_Severity$$'
+   AND CAST(JSON_EXTRACT(raw,'$.Severity.Normalized') AS INT) >= CAST('$$AWS_Severity is >= N$$' AS INT)
+   AND CASE '$$Include CVE notifications (1 = True, 0 = False)$$' WHEN '1' 
+         THEN CAST(JSON_EXTRACT(raw,'$.Title') AS VARCHAR) LIKE 'CVE-%' 
+         ELSE CAST(JSON_EXTRACT(raw,'$.Title') AS VARCHAR) NOT LIKE 'CVE-%' END
+   AND CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%$$AWS Type LIKE$$%'
+   AND CASE '$$Include Software and Configuration (1 = True, 0 = False)$$' WHEN '1' 
+         THEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE 'Software and Configuration%' 
+         ELSE CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) NOT LIKE 'Software and Configuration%' END
+GROUP BY 2,3,4,5,6,7,8
+ORDER BY CAST(JSON_EXTRACT(raw,'$.Severity.Normalized') AS INT) DESC
