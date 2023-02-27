@@ -1,0 +1,18 @@
+/*
+
+This will Microsoft Security Graph trends by day.
+In line 14, there is a commented field where you could sort the title further for a specific alert
+
+*/
+
+WITH List AS ( SELECT 
+   substring(CAST(event_date_time AS VARCHAR),1,10) Day,
+   Severity,
+   COUNT(event_date_time) Severity_Events,
+   CASE severity WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END Severity_score
+FROM mdr_ms_graph_api_data
+--WHERE title NOT LIKE '[SAMPLE ALERT]%'
+GROUP BY 1, 2
+)
+SELECT Day, Severity, Severity_Events Count FROM List
+ORDER BY Day DESC, Severity_Score DESC
