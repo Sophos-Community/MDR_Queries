@@ -1,0 +1,16 @@
+-- List of communications to ids messages *Exclude ids_msg's that are NULL
+SELECT DISTINCT
+   COUNT(*) instances,
+   CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) NDR_Report_Name,
+   CAST(JSON_EXTRACT(raw, '$.description') AS VARCHAR) Description,
+--   (SELECT meta_hostname FROM xdr_data WHERE meta_ip_address = CAST(JSON_EXTRACT(raw, '$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].src_ip') AS VARCHAR)) ep_name,
+   CAST(JSON_EXTRACT(raw, '$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].src_ip') AS VARCHAR) src_ip,
+   CAST(JSON_EXTRACT(raw, '$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].ids_msg') AS VARCHAR) Ids_Msg,
+   CAST(JSON_EXTRACT(raw, '$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].dest_ip') AS VARCHAR) dest_ip,
+   CAST( JSON_EXTRACT(raw, '$.id') AS VARCHAR) NDR_Report_ID
+FROM mdr_ioc_all, UNNEST(SEQUENCE(1,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context')))) AS A(x) 
+WHERE ioc_detection_id LIKE 'NDR%' 
+   AND CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR)
+   AND CAST( JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'idsSrcIps'
+   AND LENGTH(CAST(JSON_EXTRACT(raw, '$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].ids_msg') AS VARCHAR)) > 0
+GROUP BY 2,3,4,5,6,7
