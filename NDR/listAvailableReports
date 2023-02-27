@@ -1,0 +1,13 @@
+-- List of Distinct Reports
+SELECT DISTINCT
+   CAST(JSON_EXTRACT(raw, '$.ingest_date') AS VARCHAR) Ingest_Date,
+   CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) Report_Name,
+--   ARRAY_JOIN(ARRAY_AGG(DISTINCT CAST( JSON_EXTRACT(raw, '$.id') AS VARCHAR)), ', '||CHR(10)) List_of_report_IDs,
+   CAST( JSON_EXTRACT(raw, '$.id') AS VARCHAR) ID,
+   COUNT(*) Instances
+FROM mdr_ioc_all
+
+WHERE ioc_detection_id LIKE 'NDR%' 
+   AND CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR)
+GROUP by JSON_EXTRACT(raw, '$.name'), JSON_EXTRACT(raw,'$.id'), JSON_EXTRACT(raw, '$.ingest_date') 
+ORDER By 2 ASC, 1 DESC
