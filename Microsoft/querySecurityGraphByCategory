@@ -1,0 +1,9 @@
+SELECT 
+   Category,
+   title,
+   description,
+   severity,
+--   ARRAY_JOIN(ARRAY_AGG(title ||' :: '|| description),CHR(10)) title_list,
+   COUNT(severity) Count
+FROM mdr_ms_graph_api_data GROUP BY Category, title, description, severity
+ORDER BY CASE Severity WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END DESC, 5 DESC, Category, title, description
