@@ -1,0 +1,11 @@
+-- Show Devices without XDR
+SELECT DISTINCT
+   -- Device
+   REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].src_ip') AS VARCHAR),',',CHR(10)) src_ip,
+   CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].src_mac') AS VARCHAR) src_mac,
+   REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x-1 AS VARCHAR)||'].web_hostname') AS VARCHAR),',',CHR(10)) web_hostname
+FROM mdr_ioc_all, UNNEST(SEQUENCE(1,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context')))) AS A(x)
+WHERE ioc_detection_id LIKE 'NDR%' 
+   AND CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR)
+   AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'InterceptXNotDetected'
+ORDER BY 1 ASC
