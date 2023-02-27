@@ -1,0 +1,17 @@
+-- MS Graph API Alerts
+
+-- VARIABLE STRING $$category$$
+-- VARIABLE STRING $$severity$$
+
+WITH List AS ( SELECT 
+   Category,
+   Severity,
+   title,
+   COUNT(event_date_time) Counter,
+   CASE severity WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END Severity_score
+FROM mdr_ms_graph_api_data
+WHERE LOWER(Category) LIKE LOWER('%$$category$$%') AND LOWER(severity) LIKE LOWER('%$$severity$$%')
+GROUP BY category, severity, title
+)
+SELECT Severity, Category, title, Counter FROM List
+ORDER BY Category, Severity_Score DESC
