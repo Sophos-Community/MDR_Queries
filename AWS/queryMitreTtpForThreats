@@ -1,0 +1,61 @@
+SELECT
+   COUNT(*) Instances,
+   -- Sophos Severity - AWS Severity
+   ioc_severity Sophos_Severity,
+   CAST(JSON_EXTRACT(raw,'$.Severity.Normalized') AS VARCHAR) AS AWS_Severity,
+   -- Sophos Category - AWS Type
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Command%Control%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%UnauthorizedAccess%' THEN 'Threat'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Initial Access%' THEN 'Threat'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%InitialAccess%' THEN 'Threat'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Privilege Escalation%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%PrivilegeEscalation%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Impact%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Execution%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Defense Evasion%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%DefenseEvasion%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Credential Access%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%CredentialAccess%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Discovery%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Lateral Movement%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%LateralMovement%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Collection%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Reconnaissance%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Execution%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Persistence%' THEN 'Threat' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Exfiltration%' THEN 'Threat' 
+      ELSE 'Vulnerability' 
+   END Category,
+   CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) AWS_Type,
+   CAST(JSON_EXTRACT(raw,'$.Title') AS VARCHAR) Title,
+   CAST(JSON_EXTRACT(raw,'$.Description') AS VARCHAR) Description,
+   -- MITRE
+   ioc_detection_mitre_attack,
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Command%Control%' THEN 'Command and Control' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%UnauthorizedAccess%' THEN 'Initial Access'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Initial Access%' THEN 'Initial Access'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%InitialAccess%' THEN 'Initial Access'
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Privilege Escalation%' THEN 'Privilege Escalation' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%PrivilegeEscalation%' THEN 'Privilege Escalation' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Impact%' THEN 'Impact' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Execution%' THEN 'Execution' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Defense Evasion%' THEN 'Defense Evasion' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%DefenseEvasion%' THEN 'Defense Evasion' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Credential Access%' THEN 'Credential Access' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%CredentialAccess%' THEN 'Credential Access' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Discovery%' THEN 'Discovery' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Lateral Movement%' THEN 'Lateral Movement' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%LateralMovement%' THEN 'Lateral Movement' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Collection%' THEN 'Collection' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Reconnaissance%' THEN 'Reconnaissance' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Execution%' THEN 'Execution' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Persistence%' THEN 'Persistence' 
+      WHEN CAST(JSON_EXTRACT(raw,'$.Types[0]') AS VARCHAR) LIKE '%Exfiltration%' THEN 'Exfiltration' 
+      ELSE '' 
+   END AWS_MITRE  
+FROM mdr_ioc_all
+WHERE ioc_worker_name = 'Worker Public Cloud' 
+GROUP BY 2,3,4,5,6,7,8,9
+ORDER BY AWS_MITRE DESC
