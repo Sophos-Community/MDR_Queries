@@ -1,0 +1,16 @@
+-- QUERY NAME:    NDR - Sensor ID and Version
+-- CATEGORY:      All queries, NDR
+-- DESCRIPTION:   List the Sophos NDR Sensor ID and version by day
+-- SOURCE:        Data Lake
+
+-- VERSION:       1.1
+-- Change Log:    Added version informaiton
+
+SELECT DISTINCT
+      CAST(JSON_EXTRACT(NDR_IOC.raw, '$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(NDR_IOC.raw, '$.sensor') AS VARCHAR) Sensor,
+      CAST(JSON_EXTRACT(NDR_IOC.raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(NDR_IOC.raw, '$.sensor_version') AS VARCHAR) Sensor_Version
+FROM mdr_ioc_all AS NDR_IOC
+WHERE NDR_IOC.ioc_worker_id = 'worker_ndr'
+ORDER BY Day DESC
