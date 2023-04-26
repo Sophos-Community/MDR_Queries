@@ -1,0 +1,45 @@
+-- QUERY NAME:    NDR - Report count
+-- CATEGORY:      All queries, NDR
+-- DESCRIPTION:   List the available NDR reports by day and type
+-- SOURCE:        Data Lake
+
+-- VARIABLE:    $$Report Name$$        STRING
+-- VARIABLE:    $$Report Type$$        STRING
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH List AS (
+SELECT DISTINCT
+   CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+   CAST(JSON_EXTRACT(raw, '$.ingest_date') AS VARCHAR) Date,
+   CAST(JSON_EXTRACT(raw,'$.severity_score') AS VARCHAR) Severity,
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR) THEN 'Data Analytics'
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('1' AS VARCHAR) THEN 'Network Flow'
+      ELSE 'Unknown Type: '||CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR)
+   END Report_Type,
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('1' AS VARCHAR) THEN
+         CASE WHEN ioc_detection_description LIKE '%EPA Score%' THEN 'EPA Detection Engine'
+              WHEN ioc_detection_description LIKE '%DGA Score%' THEN 'DGA Detection Engine'
+              WHEN ioc_detection_description LIKE '%SRA Score%' THEN 'SRA Detection Engine'
+              WHEN ioc_detection_description LIKE '%IDS Score%' THEN 'IDS Detection Engine'
+              ELSE 'Unknown Name: '||ioc_detection_description
+         END
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR) THEN CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR)
+      ELSE 'Unknown Name: '|| ioc_detection_description
+   END Report_Name,
+   ioc_detection_description Description,
+   COUNT(*) Instances,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT CAST(JSON_EXTRACT(raw,'$.message_identifier') AS VARCHAR)),','||CHR(10)) Message_Identifier_List
+FROM mdr_ioc_all
+WHERE ioc_worker_id = 'worker_ndr'
+GROUP by 1,2,3,4,5,6 
+)
+SELECT * FROM List 
+WHERE LOWER(Report_Type) LIKE LOWER('%$$Report Type$$%') 
+   AND LOWER(Report_Name) LIKE LOWER('%$$Report Name$$%')
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+ORDER By 1 DESC, 2 DESC, 6 DESC
