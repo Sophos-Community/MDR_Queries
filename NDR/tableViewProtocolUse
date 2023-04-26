@@ -1,0 +1,40 @@
+-- NAME:        NDR - Table view Protocol use
+-- CATEGORY:    NDR
+-- DESCRIPTION: Detection for identifying protocols used and how often
+-- SOURCE:      Data Lake
+
+-- VARIABLE:    $$Application Protocol$$ STRING
+-- VARIABLE:    $$Network Protocol$$     STRING
+-- VARIABLE:    $$Sensor ID$$            STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+
+      -- Detection Context
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) app_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].net_protocol') AS VARCHAR) net_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE) "download_bytes (bytes)",
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE) "upload_bytes (bytes)"
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_worker_id = 'worker_ndr'
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'protocolCount'
+   )
+   
+SELECT 
+   Sensor_ID,
+   Day, 
+   net_protocol, 
+   app_protocol, 
+   "download_bytes (bytes)", 
+   "upload_bytes (bytes)" 
+
+FROM NDR_Data 
+WHERE CASE WHEN app_protocol > '' THEN LOWER(app_protocol) LIKE LOWER('%$$Application Protocol$$%') ELSE CASE WHEN '$$Application Protocol$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN net_protocol > '' THEN LOWER(net_protocol) LIKE LOWER('%$$Network Protocol$$%') ELSE CASE WHEN '$$Network Protocol$$%' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+ORDER BY Day DESC, "download_bytes (bytes)" DESC, "upload_bytes (bytes)", net_protocol ASC, app_protocol ASC
