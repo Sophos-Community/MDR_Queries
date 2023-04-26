@@ -1,0 +1,68 @@
+-- NAME:        NDR - Top 10 hosts for each protocol seen
+-- CATEGORY:    NDR
+-- DESCRIPTION: Detection for identifying all used application protocols on the network and the top five hosts using each
+-- SOURCE:      Data Lake
+ 
+-- VARIABLE:    $$Application Protocol$$ STRING
+-- VARIABLE:    $$IP Address$$           IP ADDRESS
+-- VARIABLE:    $$MAC Address$$          STRING
+-- VARIABLE:    $$meta_hostname$$        DEVICE_NAME
+-- VARIABLE:    $$Sensor ID$$            STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) Report_Name,
+      CAST(JSON_EXTRACT(raw,'$.description') AS VARCHAR) Description,
+
+      -- Detection Context
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) App_protocol,
+      SPLIT(REPLACE(REPLACE(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].top_hosts') AS VARCHAR),'(',''),'),',CHR(10)),')',''),CHR(10)) top_hosts,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].total_bytes') AS VARCHAR) total_bytes
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_detection_id LIKE 'NDR%' 
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'topEachProtocol'
+   ),
+Flat_NDR AS (
+   SELECT 
+      Sensor_ID,
+      Day, 
+      Report_Name, 
+      Description, 
+      App_protocol, 
+      CAST(REPLACE(ELEMENT_AT(SPLIT(ELEMENT_AT(top_hosts,x),','),1),CHR(39),'') AS VARCHAR) IP_Address,
+      CAST(REPLACE(ELEMENT_AT(SPLIT(ELEMENT_AT(top_hosts,x),','),2),CHR(39),'') AS VARCHAR) MAC_Address,
+      CAST(ELEMENT_AT(SPLIT(ELEMENT_AT(top_hosts,x),','),3) AS BIGINT) Bytes,
+      total_bytes
+   FROM NDR_Data, UNNEST(SEQUENCE(1,CARDINALITY(top_hosts))) AS H(x)
+   )
+   
+SELECT 
+   F_NDR.Sensor_ID,
+   F_NDR.Day,
+   F_NDR.App_protocol,
+   F_NDR.IP_Address,
+   F_NDR.MAC_Address,
+   CAST(FORMAT('%.2f',CAST(F_NDR.Bytes AS DOUBLE)/1024/1024) AS DOUBLE) Device_MB,
+   CAST(FORMAT('%.2f',CAST(F_NDR.total_bytes AS DOUBLE)/1024/1024) AS DOUBLE) "Protocol Total (MB)",
+  -- XDR data --
+   CASE WHEN XDR.meta_hostname > '' THEN 'XDR_Installed' ELSE CASE WHEN F_NDR.MAC_Address > '' THEN 'NOT Managed' ELSE '' END END XDR_Enabled,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_hostname),CHR(10)) meta_hostname, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_os_platform),CHR(10)) os_platform,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_endpoint_type),CHR(10)) endpoint_type, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_username),CHR(10)) username
+FROM Flat_NDR F_NDR 
+   LEFT JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(F_NDR.MAC_Address) 
+      -- Include the Stream_Ingest_date match to the NDR.Day info to determine if XDR was installed at the time of the NDR data or not
+      AND XDR.stream_ingest_date = F_NDR.Day
+WHERE CASE WHEN F_NDR.App_protocol > '' THEN LOWER(F_NDR.App_protocol) LIKE LOWER('%$$Application Protocol$$%') ELSE CASE WHEN '$$Application Protocol$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN F_NDR.IP_Address > '' THEN LOWER(F_NDR.IP_Address) LIKE LOWER('%$$IP Address$$%') ELSE CASE WHEN '$$IP Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN F_NDR.MAC_Address > '' THEN LOWER(F_NDR.MAC_Address) LIKE LOWER ('%$$MAC Address$$%') ELSE CASE WHEN '%$$MAC Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN XDR.meta_hostname > '' THEN LOWER(XDR.meta_hostname) LIKE LOWER('%$$meta_hostname$$%') ELSE CASE WHEN '$$meta_hostname$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE F_NDR.Sensor_ID = '$$Sensor ID$$' END
+GROUP BY 1,2,3,4,5,6,7,8
+ORDER BY Day DESC, "Protocol Total (MB)" DESC, App_protocol DESC, Device_MB DESC
