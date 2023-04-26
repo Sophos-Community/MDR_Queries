@@ -1,0 +1,36 @@
+-- NAME:        NDR - Managed and Unmanaged device count
+-- CATEGORY:    NDR
+-- DESCRIPTION: Provide a count of the number of devices observed, by using the MAC address as a proxy 
+-- SOURCE:      Data Lake
+
+-- VARIABLE $$IP Address$$    IP_ADDRESS
+-- VARIABLE $$MAC Address$$   STRING
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT DISTINCT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].mac') AS VARCHAR) MAC_Address,
+      RTRIM(LTRIM(LTRIM(RTRIM(LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ips') AS VARCHAR),'::',''),'0.0.0.0',''),',',','||CHR(10)),CHR(10)||','||CHR(10),''),','),','),CHR(10)),CHR(10)),','),',') IP_List
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_worker_id = 'worker_ndr' AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'macIpCorrelation'
+   )
+
+--SELECT * FROM  NDR_Data -- USED TO DEBUG errors in the above NDR_Data select
+
+SELECT 
+   NDR_3.Sensor_ID,
+   NDR_3.Day,
+   COUNT(*) "Total_Distinct_MacAddresses",
+   (SELECT COUNT(DISTINCT xdr.meta_mac_address) FROM NDR_Data NDR_1 JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(NDR_1.Mac_Address) AND XDR.stream_ingest_date = NDR_1.Day) Managed, 
+   COUNT(*) - (SELECT COUNT(DISTINCT XDR.meta_mac_address) FROM NDR_Data NDR_2 JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(NDR_2.Mac_Address) AND XDR.stream_ingest_date = NDR_2.Day) Un_Managed
+FROM NDR_Data NDR_3 
+WHERE CASE WHEN NDR_3.IP_List > '' THEN LOWER(NDR_3.IP_List) LIKE LOWER('%$$IP Address$$%') ELSE CASE WHEN '$$IP Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN NDR_3.Mac_Address > '' THEN LOWER(NDR_3.Mac_Address) LIKE LOWER('%$$MAC Address$$%') ELSE CASE WHEN '$$MAC Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE NDR_3.Sensor_ID = '$$Sensor ID$$' END
+GROUP BY 1,2
+ORDER BY Day DESC
