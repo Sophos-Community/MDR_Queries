@@ -1,0 +1,59 @@
+-- NAME:        NDR - Mac IP Hostname Correlation
+-- CATEGORY:    NDR
+-- DESCRIPTION: Source Mac IP and Hostname Correlation based on MDNS and NetBIOS
+--              NOTE: This includes hostname information extracted from the flow data where available. 
+--              If no web_hostname was identified it will not be in the list
+
+-- VARIABLE:    $$Source IP$$          IP_ADDRESS
+-- VARIABLE:    $$Source MAC Address$$ STRING
+-- VARIABLE:    $$Web_hostname$$       DEVICE_NAME
+-- VARIABLE:    $$meta_hostname$$      DEVICE_NAME
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw,'$.name') AS VARCHAR) Report_Name,
+      CAST(JSON_EXTRACT(raw,'$.description') AS VARCHAR) Description,
+
+      -- Detection Context
+      REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip') AS VARCHAR),',',','||CHR(10)) Source_IP_List,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_mac') AS VARCHAR) Source_MAC_Address,
+      REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].web_hostname') AS VARCHAR),',',','||CHR(10)) Web_Hostname_List
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_detection_id LIKE 'NDR%' 
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'MacIpHostnameCorrelation'
+   GROUP BY 1,2,3,4,5,6,7
+   )
+
+SELECT 
+   NDR.Sensor_ID,
+   NDR.Day, 
+
+   -- Perform some array work to get the distinct list of Source_IPs for the group
+   ARRAY_JOIN(ARRAY_DISTINCT(SPLIT(REPLACE(ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.Source_IP_List),CHR(10)),',',''),CHR(10))),CHR(10)) Source_IP_List, 
+   NDR.Source_Mac_Address, 
+   -- Perform some ugly array work to get the distinct list of Web_Hostnames for the group
+   ARRAY_JOIN(ARRAY_DISTINCT(SPLIT(REPLACE(ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.Web_Hostname_List),CHR(10)),',',''),CHR(10))),CHR(10)) Web_Hostname_List,
+   
+   -- XDR data --
+   CASE WHEN XDR.meta_hostname > '' THEN 'XDR_Installed' ELSE CASE WHEN NDR.Source_Mac_Address > '' THEN 'NOT Managed' ELSE '' END END XDR_Enabled,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_hostname),CHR(10)) meta_hostname, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_os_platform),CHR(10)) os_platform,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_endpoint_type),CHR(10)) endpoint_type, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_username),CHR(10)) username
+FROM NDR_Data NDR 
+   LEFT JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(NDR.Source_Mac_Address) 
+      -- Include the Stream_Ingest_date match to the NDR.Day info to determine if XDR was installed at the time of the NDR data or not
+      AND XDR.stream_ingest_date = NDR.Day
+WHERE CASE WHEN XDR.meta_hostname > '' THEN LOWER(XDR.meta_hostname) LIKE LOWER('%$$meta_hostname$$%') ELSE CASE WHEN '$$meta_hostname$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+      AND CASE WHEN NDR.Source_ip_List > '' THEN LOWER(NDR.Source_ip_List) LIKE LOWER('%$$Source IP$$%') ELSE CASE WHEN '$$Source IP$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+      AND CASE WHEN NDR.Source_Mac_Address > '' THEN LOWER(NDR.Source_Mac_Address) LIKE LOWER('%$$Source MAC Address$$%') ELSE CASE WHEN '$$Source MAC Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+      AND CASE WHEN NDR.Web_Hostname_List > '' THEN LOWER(NDR.Web_Hostname_List) LIKE LOWER('%$$Web_hostname$$%') ELSE CASE WHEN '$$Web_hostname$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+      AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+GROUP BY NDR.Sensor_ID, NDR.Day, NDR.Report_Name, NDR.Description, NDR.Source_Mac_Address, 6
+ORDER BY NDR.Day DESC, XDR_Enabled DESC
