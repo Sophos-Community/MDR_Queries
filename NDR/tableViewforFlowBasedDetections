@@ -1,0 +1,102 @@
+-- NAME:        NDR - Table view for FLOW based detections
+-- CATEGORY:    NDR
+-- DESCRIPTION: Examine the detection context for flow based detections and provide context and investigation actions
+--              Show results as a table with XDR managed device information at the end
+
+-- VARIABLE:    $$Message Identifier$$ SHA-256
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(ioc_severity AS VARCHAR) ioc_severity,
+      CAST(JSON_EXTRACT(raw,'$.message_identifier') AS VARCHAR) Message_Identifier,
+      CAST(JSON_EXTRACT(raw,'$.detection_context_count') AS VARCHAR) FLOW_Count,
+      raw,
+
+      -- Detection Context
+      JSON_EXTRACT(JSON_PARSE(ELEMENT_AT(MAP_VALUES(mapped_raw),ARRAY_POSITION(MAP_KEYS(mapped_raw), 'detection_context') )),'$['||CAST(A.x AS VARCHAR)||']') ROW, -- DC Row
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].timestamp') AS VARCHAR) timestamp,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].protocol') AS VARCHAR) protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) app_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip') AS VARCHAR) src_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_port') AS VARCHAR) src_port,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_ip') AS VARCHAR) dest_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_port') AS VARCHAR) dest_port,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].web_hostname') AS VARCHAR) web_hostname,
+
+      -- FLOW Risk details
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].flow_id') AS VARCHAR) flow_id,
+      CAST(REPLACE(REPLACE(JSON_FORMAT(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].flow_risk')),'[',''),']','') AS VARCHAR) flow_risk,
+
+      -- IDS Detection Info
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_description') AS VARCHAR) ids_description,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_id') AS VARCHAR) ids_id,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR) ids_msg,
+
+      -- Domain Generation detectioin 
+--      'DGA: '||CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga') AS VARCHAR)||' - '||
+      CASE
+         WHEN CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga_prediction') AS VARCHAR) > '' THEN
+            CAST(FORMAT('%.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga_prediction') AS DOUBLE)) AS VARCHAR) 
+         ELSE ''
+      END model_dga_prediction,
+
+      -- ML Family detection
+--      'EPA: '||CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_epa') AS VARCHAR)||' - '||
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_malware_label') AS VARCHAR)||' - '||
+      CASE
+         WHEN CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_confidence') AS VARCHAR) > ''
+            THEN CAST(FORMAT('%.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_confidence') AS DOUBLE)) AS VARCHAR)
+         ELSE ''
+      END model_epa_confidence,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_mac') AS VARCHAR) src_mac,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_mac') AS VARCHAR) dest_mac,
+ 
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_bytes') AS VARCHAR) client_to_server_bytes,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_duration') AS VARCHAR) client_to_server_duration,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_tcp_flags') AS VARCHAR) client_to_server_tcp_flags,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_bytes') AS VARCHAR) server_to_client_bytes,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_duration') AS VARCHAR) server_to_client_duration,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_tcp_flags') AS VARCHAR) server_to_client_tcp_flags,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].community_id') AS VARCHAR) community_id,
+
+      -- GEO LOCATION DATA
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_as_number') AS VARCHAR) dest_location_as_number,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_country_code') AS VARCHAR) dest_location_country_code,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_as_name') AS VARCHAR) dest_location_as_name,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_continent') AS VARCHAR) dest_location_continent,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_country_name') AS VARCHAR) dest_location_country_name,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_territory') AS VARCHAR) dest_location_territory,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_city') AS VARCHAR) dest_location_city,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_latitude') AS VARCHAR) dest_location_latitude,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_longitude') AS VARCHAR) dest_location_longitude,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_content_type') AS VARCHAR) http_content_type,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_response_code') AS VARCHAR) http_response_code,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_url') AS VARCHAR) http_url,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_user_agent') AS VARCHAR) http_user_agent,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_cert_hash') AS VARCHAR) tls_cert_hash,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3c') AS VARCHAR) tls_ja3c,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3c_plus') AS VARCHAR) tls_ja3c_plus,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3s') AS VARCHAR) tls_ja3s,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_jarm') AS VARCHAR) tls_jarm,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_not_after') AS VARCHAR) tls_not_after,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_not_before') AS VARCHAR) tls_not_before
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_detection_id = 'NDR-FLOW-BASED'
+      AND LOWER(Message_Identifier) LIKE LOWER('%$$Message Identifier$$%')
+   )
+
+SELECT * FROM NDR_Data 
+WHERE LOWER(Message_Identifier) LIKE LOWER('%$$Message Identifier$$%') 
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+ORDER BY Day DESC, Message_Identifier DESC
