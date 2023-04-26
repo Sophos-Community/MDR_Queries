@@ -1,0 +1,70 @@
+-- NAME:        NDR - Top Clusters (BARS)
+-- CATEGORY:    NDR
+-- DESCRIPTION: Detection for identifying the clusters with the most traffic in bytes. 
+--              A cluster is a group of flows defined by their shared values for src_ip, dest_ip, dest_port, protocol, app_protocol
+-- SOURCE:      Data Lake
+
+-- VARIABLE $$Application Protocol$$    STRING
+-- VARIABLE $$Source IP$$               IP ADDRESS
+-- VARIABLE $$Destination IP$$          IP ADDRESS
+-- VARIABLE $$Destination IP Category$$ STRING
+-- VARIABLE $$Source IP Category$$      STRING
+-- VARIABLE $$Domain$$                  URL
+
+-- VERSION: 1.1
+-- Change Log: Add Sensor ID Not enough variables for a Filter
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) Report_Name,
+      CAST(JSON_EXTRACT(raw,'$.description') AS VARCHAR) Description,
+
+      -- Detection Context
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) app_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip') AS VARCHAR) src_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_ip') AS VARCHAR) dest_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_port') AS VARCHAR) dest_port,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip_category') AS VARCHAR) src_ip_category,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_ip_category') AS VARCHAR) dest_ip_category,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].domain_list') AS VARCHAR) domain_list,
+      CASE 
+         WHEN CAST(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE)) AS BIGINT) = 0 THEN ''
+         WHEN CAST(SQRT(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE))/(1024*1024)) AS BIGINT) = 0 THEN '|'
+         ELSE RPAD('',CAST(SQRT(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE))/(1024*1024)) AS BIGINT),'█') 
+      END || CAST(FORMAT(' %,.2f',CAST(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE))/(1024*1024) AS DOUBLE)) AS VARCHAR) "Download (MB)",
+   
+      CASE 
+         WHEN CAST(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE)) AS BIGINT) = 0 THEN ''
+         WHEN CAST(SQRT(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE))/(1024*1024)) AS BIGINT) = 0 THEN '|'
+         ELSE RPAD('',CAST(SQRT(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE))/(1024*1024)) AS BIGINT),'█') 
+      END || CAST(FORMAT(' %,.2f',CAST(SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE))/(1024*1024) AS DOUBLE)) AS VARCHAR) "Upload (MB)",
+
+      FORMAT('%.2f',SUM(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].total_bytes') AS DOUBLE))/(1024*1024)) "Total (MB)"
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_worker_id = 'worker_ndr'  
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'topClusters'
+   GROUP BY 1,2,3,4,5,6,7,8,9,10,11
+   )
+
+SELECT 
+   Sensor_ID,
+   Day, 
+   app_protocol, 
+   "Download (MB)", 
+   "Upload (MB)", 
+   src_ip, 
+   dest_ip, 
+   dest_port, 
+   REPLACE(REPLACE(RTRIM(LTRIM(domain_list,','),','),',,',','),',',CHR(10)) Domain_List, 
+   src_ip_category, 
+   dest_ip_category, 
+   CAST("Total (MB)" AS DOUBLE) "Total (MB)" 
+FROM NDR_Data
+WHERE CASE WHEN app_protocol > '' THEN LOWER(app_protocol) LIKE LOWER('%$$Application Protocol$$%') ELSE CASE WHEN '$$Application Protocol$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN src_ip > '' THEN LOWER(src_ip) LIKE LOWER('%$$Source IP$$%') ELSE CASE WHEN '$$Source IP$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN dest_ip > '' THEN LOWER(dest_ip) LIKE LOWER('%$$Destination IP$$%') ELSE CASE WHEN '$$Destination IP$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN dest_ip_category > '' THEN LOWER(dest_ip_category) LIKE LOWER('%$$Destination IP Category$$%') ELSE CASE WHEN '$$Destination IP Category$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN src_ip_category > '' THEN LOWER(src_ip_category) LIKE LOWER('%$$Source IP Category$$%') ELSE CASE WHEN '$$Source IP Category$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN domain_list > '' THEN LOWER(domain_list) LIKE LOWER('%$$Domain$$%') ELSE CASE WHEN '$$Domain$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+ORDER BY Day DESC, "Total (MB)" DESC
