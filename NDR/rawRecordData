@@ -1,0 +1,60 @@
+-- NAME:        NDR - Raw record data
+-- CATEGORY:    NDR
+-- DESCRIPTION: Display all fields for the NDR Detection or Report record.  
+--              NOTE the interesting bits are in the 'raw' field.  It is a JSON structure.  
+--              The 'mapped_raw' is an array structure of the same.
+--              USE this query to view the raw field so it is easier to build more advanced queries
+-- SOURCE:      Data Lake
+
+-- VARIABLE $$Message Identifier$$ SHA256
+-- VARIABLE $$Report Name$$        STRING
+-- VARIABLE $$Report Type$$        STRING
+-- VARIABLE $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.id') AS VARCHAR) Sensor_ID,
+      NDR_IOC.ioc_created_at date_time,
+      NDR_IOC.ioc_detection_id,
+      NDR_IOC.ioc_severity,
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR) THEN 'Data Analytics'
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('1' AS VARCHAR) THEN 'Network Flow'
+      ELSE 'Unknown Type: '||CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR)
+   END Report_Type,
+     -- DDE 'reports' have a name at the top level of the JSON structure, but FLOW based detections do not
+   CASE 
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('1' AS VARCHAR) THEN
+         CASE WHEN ioc_detection_description LIKE '%EPA Score%' THEN 'EPA Detection Engine'
+              WHEN ioc_detection_description LIKE '%DGA Score%' THEN 'DGA Detection Engine'
+              WHEN ioc_detection_description LIKE '%SRA Score%' THEN 'SRA Detection Engine'
+              WHEN ioc_detection_description LIKE '%IDS Score%' THEN 'IDS Detection Engine'
+              ELSE 'Unknown Name: '||ioc_detection_description
+         END
+      WHEN CAST(JSON_EXTRACT(raw, '$.type') AS VARCHAR) = CAST('2' AS VARCHAR) THEN CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR)
+      ELSE 'Unknown Name: '|| ioc_detection_description
+   END Report_Name,
+      -- DDE 'reports' have a description, at the top level of the JSON structure, For Flow based detections a description is often in each detection context record, but now always
+      CASE
+         WHEN CAST(JSON_EXTRACT(NDR_IOC.raw, '$.type') AS VARCHAR) = '1' THEN CAST(JSON_EXTRACT(NDR_IOC.raw,'$.detection_context[0].ids_description') AS VARCHAR)||
+            CASE WHEN CAST(JSON_EXTRACT(NDR_IOC.raw,'$.description') AS VARCHAR) > '' THEN ' - '||CAST(JSON_EXTRACT(NDR_IOC.raw,'$.description') AS VARCHAR) ELSE '' END
+         WHEN CAST(JSON_EXTRACT(NDR_IOC.raw, '$.type') AS VARCHAR) = '2' THEN CAST(JSON_EXTRACT(NDR_IOC.raw,'$.description') AS VARCHAR)
+         ELSE 'UNKNOWN TYPE'
+      END Description,
+      CAST(JSON_EXTRACT(NDR_IOC.raw,'$.message_identifier') AS VARCHAR) Message_ID,
+      NDR_IOC.raw,
+      NDR_IOC.mapped_raw,
+      * -- SHOW FULL RECORD
+   FROM mdr_ioc_all AS NDR_IOC
+   WHERE NDR_IOC.ioc_worker_id = 'worker_ndr'
+      AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+   )
+   
+SELECT * FROM NDR_Data 
+WHERE LOWER(Report_Name) LIKE LOWER('%$$Report Name$$%') 
+   AND LOWER(Report_Type) LIKE LOWER('%$$Report Type$$%')
+   AND LOWER(Message_ID) LIKE LOWER('%$$Message Identifier$$%')
+ORDER BY date_time DESC, Report_Name ASC
