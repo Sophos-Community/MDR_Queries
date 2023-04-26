@@ -1,0 +1,50 @@
+-- NAME:        NDR - Devices with with suspect threat intelligence hits
+-- CATEGORY:    NDR
+-- DESCRIPTION: List of Source Ips(src_ip) that communicated to a suspect external IP (dest_ip) identified as suspect or malicious. IDS Score > 20
+-- SOURCE:      Data Lake
+
+-- VARIALBE:    $$Source IP$$          IP_ADDRESS
+-- VARIABLE:    $$Destination IP$$     IP_ADDRESS
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT DISTINCT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) Report_Name,
+      CAST(JSON_EXTRACT(raw,'$.description') AS VARCHAR) Description,
+      CAST(JSON_EXTRACT(raw,'$.severity_score') AS VARCHAR) Severity,
+      CAST(JSON_EXTRACT(raw,'$.message_identifier') AS VARCHAR) Message_Identifier,
+
+      -- Detection Context
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_ip') AS VARCHAR) dest_ip,
+      CASE WHEN CARDINALITY(SPLIT(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR),'[',''),']')) = 2 
+         THEN ELEMENT_AT(SPLIT(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR),'[',''),']'),1) 
+         ELSE ''
+      END Threat_Intel_Source,
+      CASE WHEN CARDINALITY(SPLIT(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR),'[',''),']')) = 2 
+         THEN ELEMENT_AT(SPLIT(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR),'[',''),']'),2) 
+         ELSE ELEMENT_AT(SPLIT(REPLACE(CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR),'[',''),']'),1)
+      END Threat,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip') AS VARCHAR) src_ip
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_worker_id = 'worker_ndr' 
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'idsSrcIps'
+   )
+
+SELECT 
+   Sensor_ID,
+   Day, 
+   Severity,
+   src_ip,
+   dest_ip,
+   Threat_Intel_Source,
+   Threat,
+   Message_Identifier
+FROM NDR_Data
+WHERE LOWER(src_ip) LIKE '%$$Source IP$$%' AND LOWER(dest_ip) LIKE '%$$Destination IP$$%'
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+ORDER BY Day DESC
