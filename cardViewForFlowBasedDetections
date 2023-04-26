@@ -1,0 +1,320 @@
+-- NAME:        NDR - Card view for FLOW based detections
+-- CATEGORY:    NDR
+-- DESCRIPTION: Examine the detection context for flow based detections and provide context and investigation actions
+
+-- VARIABLE:    $$Message Identifier$$ SHA-256
+-- VARIABLE:    $$Sensor ID$$          STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDPI_Flow_Risks(Flow_risk, Description) AS ( 
+   VALUES 
+   ('URL_POSSIBLE_XSS','HTTP only: this risk indicates a possible XSS (Cross Side Scripting) attack.'),
+   ('URL_POSSIBLE_SQL_INJECTION','HTTP only: this risk indicates a possible SQL Injection attack.'),
+   ('URL_POSSIBLE_RCE_INJECTION','HTTP only: this risk indicates a possible RCE (Remote Code Execution) attack.'),
+   ('BINARY_APPLICATION_TRANSFER','HTTP only: this risk indicates that a binary application is downloaded/uploaded. Detected applications include Windows binaries, Linux executables, Unix scripts and Android apps.'),
+   ('KNOWN_PROTOCOL_ON_NON_STANDARD_PORT','This risk indicates a known protocol used on a non standard port. Example HTTP is supposed to use TCP/80, and in case it is detected on TCP/1234 this risk is detected.'),
+   ('TLS_SELFSIGNED_CERTIFICATE','TLS/QUIC only: this risk is triggered when a self-signed certificate is used.'),
+   ('TLS_OBSOLETE_VERSION','Risk triggered when TLS version is older than 1.1.'),
+   ('TLS_WEAK_CIPHER','Risk triggered when an unsafe TLS cipher is used. See this page for a list of insecure ciphers.'),
+   ('TLS_CERTIFICATE_EXPIRED','Risk triggered when a TLS certificate is expired, i.e. the current date falls outside of the certificate validity dates.'),
+   ('TLS_CERTIFICATE_MISMATCH','Risk triggered when a TLS certificate does not match the hostname we’re accessing. Example you do http://www.aaa.com and the TLS certificate returned is for www.bbb.com.'),
+   ('HTTP_SUSPICIOUS_USER_AGENT','HTTP only: this risk is triggered whenever the user agent contains suspicious characters or its format is suspicious. Example: <?php something ?> is a typical suspicious user agent.'),
+   ('HTTP_NUMERIC_IP_HOST','HTTP only: this risk is triggered whenever we’re accessing a host using its IP rather than its symbolic name. Example http://1.2.3.4.'),
+   ('HTTP_SUSPICIOUS_URL','HTTP only: this risk is triggered whenever the accessed URL is suspicious. Example: http://127.0.0.1/msadc/..%255c../..%255c../..%255c../winnt/system32/cmd.exe.'),
+   ('HTTP_SUSPICIOUS_HEADER','HTTP only: this risk is triggered whenever the HTTP peader contains suspicious entries such as Uuid, TLS_version, Osname that are unexpected on the HTTP header.'),
+   ('TLS_NOT_CARRYING_HTTPS','TLS only: this risk indicates that this TLS flow will not be used to transport HTTP content. Example VPNs use TLS to encrypt data rather to carry HTTP. This is useful to spot this type of cases.'),
+   ('SUSPICIOUS_DGA_DOMAIN','A DGA is used to generate domain names often used by malwares. This risk indicates that this domain name can (but it’s not 100% sure) a DGA as its name is suspicious.'),
+   ('MALFORMED_PACKET','This risk is generated when a packet (e.g. a DNS packet) has an unexpected formt. This can indicate a protocol error or more often an attempt to jeopardize a valid protocol to carry other type of data.'),
+   ('SSH_OBSOLETE_CLIENT_VERSION_OR_CIPHER','This risk is generated whenever a SSH client uses an obsolete SSH protocol version or insecure ciphers.'),
+   ('SSH_OBSOLETE_SERVER_VERSION_OR_CIPHER','This risk is generated whenever a SSH server uses an obsolete SSH protocol version or insecure ciphers.'),
+   ('SMB_INSECURE_VERSION','This risk indicates that the SMB version used is insecure (i.e. v1).'),
+   ('TLS_SUSPICIOUS_ESNI_USAGE','SNI is a way to carry in TLS the host/domain name we’re accessing. ESNI means encrypted SNI and it is a way to mask SNI (carried in clear text in the TLS header) with encryption. While this practice is legal, it could be used for hiding data or for attacks such as a suspicious domain fronting.'),
+   ('UNSAFE_PROTOCOL','This risk indicates that the protocol used is insecure and that a secure protocol should be used (e.g. Telnet vs SSH).'),
+   ('DNS_SUSPICIOUS_TRAFFIC','This risk is returned when DNS traffic returns an unexpected/obsolete record type.'),
+   ('TLS_MISSING_SNI','TLS needs to carry the SNI of the remote server we’re accessing. Unfortunately SNI is optional in TLS so it can be omitted. In this case this risk is triggered as this is a non-standard situation that indicates a potential security problem or a protocol using TLS for other purposes (or a protocol bug).'),
+   ('HTTP_SUSPICIOUS_CONTENT','HTTP only: risk reported when HTTP carries content in expected format. Example the HTTP header indicates that the context is text/html but the real content is not readeable (i.e. it can transport binary data). In general this is an attempt to use a valid MIME type to carry data that does not match the type.'),
+   ('RISKY_ASN','This is a placeholder for traffic exchanged with ASN that are considered risky. nDPI does not fill this risk that instead should be filled by aplications sitting on top of nDPI (e.g. ntopng).'),
+   ('RISKY_DOMAIN','This is a placeholder for traffic exchanged with domain names that are considered risky. nDPI does not fill this risk that instead should be filled by aplications sitting on top of nDPI (e.g. ntopng).'),
+   ('MALICIOUS_JA3','JA3 is a method to fingerprint TLS traffic. This risk indicates that the JA3 of the TLS connection is considered suspicious (i.e. it has been found in known malware JA3 blacklists). nDPI does not fill this risk that instead should be filled by aplications sitting on top of nDPI (e.g. ntopng).'),
+   ('MALICIOUS_SHA1_CERTIFICATE','TLS certificates are uniquely identified with a SHA1 hash value. If such hash is found on a blacklist, this risk can be used. As for other risks, this is a placeholder as nDPI does not fill this risk that instead should be filled by aplications sitting on top of nDPI (e.g. ntopng).'),
+   ('DESKTOP_OR_FILE_SHARING_SESSION','This risk is set when the flow carries desktop or file sharing sessions (e.g. TeamViewer or AnyDesk just to mention two).'),
+   ('TLS_UNCOMMON_ALPN','This risk is set when the ALPN (it indicates the protocol carried into this TLS flow, for instance HTTP/1.1) is uncommon with respect to the list of expected values.'),
+   ('TLS_CERT_VALIDITY_TOO_LONG','From 01/09/2020 TLS certificates lifespan is limited to 13 months. This risk is triggered for certificates not respecting this directive.'),
+   ('TLS_SUSPICIOUS_EXTENSION','This risk is triggered when the domain name (SNI extension) is not printable and thus it is a problem. In TLS extensions can be dynamically specified by the client in the hello packet.'),
+   ('TLS_FATAL_ALERT','This risk is triggered when a TLS fatal alert is detected in the TLS flow. See this page for details.'),
+   ('SUSPICIOUS_ENTROPY','This risk is used to detect suspicious data carried in ICMP packets whose entropy (used to measure how data is distributed, hence to indirectly guess the type of data carried on) is suspicious and thus that it can indicate a data leak.'),
+   ('CLEAR_TEXT_CREDENTIALS','Clear text protocols are not bad per-se, but they should be avoided when they carry credentials as they can be intercepted by malicious users. This risk is triggered whenever clear text protocols (e.g. FTP, HTTP, IMAP…) contain credentials in clear text (read it as nDPI does not trigger this risk for HTTP connections that do not carry credentials).'),
+   ('DNS_LARGE_PACKET','DNS packets over UDP should be limited to 512 bytes. DNS packets over this threshold indicate a potential security risk (e.g. use DNS to carry data) or a misconfiguration.'),
+   ('DNS_FRAGMENTED','UDP DNS packets cannot be fragmented. If so, this indicates a potential security risk (e.g. use DNS to carry data) or a misconfiguration.'),
+   ('INVALID_CHARACTERS','The risk is set whenever a dissected protocol contains characters not allowed in that protocol field. For example a DNS hostname must only contain a subset of all printable characters or else this risk is set. Additionally, some TLS protocol fields are checked for printable characters as well.'),
+   ('POSSIBLE_EXPLOIT','The risk is set whenever a possible exploit (e.g. Log4J/Log4Shell) is detected.'),
+   ('TLS_CERTIFICATE_ABOUT_TO_EXPIRE','The risk is set whenever a TLS certificate is close to the expiration date.'),
+   ('PUNYCODE_IDN','The risk is set whenever a domain name is specified in IDN format as they are sometimes used in IDN homograph attacks.'),
+   ('ERROR_CODE_DETECTED','The risk is set whenever an error code is detected in the underlying protocol (e.g. HTTP and DNS).'),
+   ('HTTP_CRAWLER_BOT','The risk is set whenever a crawler/bot/robot has been detected'),
+   ('ANONYMOUS_SUBSCRIBER','The risk is set whenever the (source) ip address has been anonymized and it can’t be used to identify the subscriber. Example: the flow is generated by an iCloud-private-relay exit node.')
+   ),
+
+NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(ioc_severity AS VARCHAR) ioc_severity,
+      CAST(JSON_EXTRACT(raw,'$.message_identifier') AS VARCHAR) Message_Identifier,
+      CAST(JSON_EXTRACT(raw,'$.detection_context_count') AS VARCHAR) FLOW_Count,
+      raw,
+
+      -- Detection Context
+      JSON_EXTRACT(JSON_PARSE(ELEMENT_AT(MAP_VALUES(mapped_raw),ARRAY_POSITION(MAP_KEYS(mapped_raw), 'detection_context') )),'$['||CAST(A.x AS VARCHAR)||']') ROW, -- DC Row
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].timestamp') AS VARCHAR) timestamp,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].protocol') AS VARCHAR) protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) app_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_ip') AS VARCHAR) src_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_port') AS VARCHAR) src_port,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_ip') AS VARCHAR) dest_ip,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_port') AS VARCHAR) dest_port,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].web_hostname') AS VARCHAR) web_hostname,
+
+      -- FLOW Risk details
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].flow_id') AS VARCHAR) flow_id,
+      CAST(REPLACE(REPLACE(JSON_FORMAT(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].flow_risk')),'[',''),']','') AS VARCHAR) flow_risk,
+
+      -- IDS Detection Info
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_description') AS VARCHAR) ids_description,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_id') AS VARCHAR) ids_id,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].ids_msg') AS VARCHAR) ids_msg,
+
+      -- Domain Generation detectioin 
+--      'DGA: '||CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga') AS VARCHAR)||' - '||
+      CASE
+         WHEN CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga_prediction') AS VARCHAR) > '' THEN
+            CAST(FORMAT('%.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_dga_prediction') AS DOUBLE)*100) AS VARCHAR) 
+         ELSE ''
+      END model_dga_prediction,
+
+      -- ML Family detection
+--      'EPA: '||CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_epa') AS VARCHAR)||' - '||
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_malware_label') AS VARCHAR)||' - '||
+      CASE
+         WHEN CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_confidence') AS VARCHAR) > ''
+            THEN CAST(FORMAT('%.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].model_confidence') AS DOUBLE)) AS VARCHAR)
+         ELSE ''
+      END model_epa_confidence,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].src_mac') AS VARCHAR) src_mac,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_mac') AS VARCHAR) dest_mac,
+ 
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_bytes') AS VARCHAR) client_to_server_bytes,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_duration') AS VARCHAR) client_to_server_duration,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].client_to_server_tcp_flags') AS VARCHAR) client_to_server_tcp_flags,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_bytes') AS VARCHAR) server_to_client_bytes,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_duration') AS VARCHAR) server_to_client_duration,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].server_to_client_tcp_flags') AS VARCHAR) server_to_client_tcp_flags,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].community_id') AS VARCHAR) community_id,
+
+      -- GEO LOCATION DATA
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_as_number') AS VARCHAR) dest_location_as_number,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_country_code') AS VARCHAR) dest_location_country_code,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_as_name') AS VARCHAR) dest_location_as_name,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_continent') AS VARCHAR) dest_location_continent,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_country_name') AS VARCHAR) dest_location_country_name,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_territory') AS VARCHAR) dest_location_territory,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_city') AS VARCHAR) dest_location_city,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_latitude') AS VARCHAR) dest_location_latitude,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].dest_location_longitude') AS VARCHAR) dest_location_longitude,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_content_type') AS VARCHAR) http_content_type,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_response_code') AS VARCHAR) http_response_code,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_url') AS VARCHAR) http_url,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].http_user_agent') AS VARCHAR) http_user_agent,
+
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_cert_hash') AS VARCHAR) tls_cert_hash,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3c') AS VARCHAR) tls_ja3c,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3c_plus') AS VARCHAR) tls_ja3c_plus,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_ja3s') AS VARCHAR) tls_ja3s,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_jarm') AS VARCHAR) tls_jarm,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_not_after') AS VARCHAR) tls_not_after,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].tls_not_before') AS VARCHAR) tls_not_before
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,CASE WHEN JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context')) > 100 THEN 100 ELSE JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context')) END-1)) AS A(x)
+   WHERE ioc_detection_id = 'NDR-FLOW-BASED'
+      AND LOWER(Message_Identifier) LIKE LOWER('%$$Message Identifier$$%')
+      AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+   ),
+
+--SELECT * FROM NDR_Data WHERE LOWER(Message_Identifier) LIKE LOWER('%$$Message Identifier$$%') ORDER BY Day DESC, Message_Identifier DESC
+
+NDR_Grouped_Flow AS (SELECT 
+   NDR.Sensor_ID,
+   NDR.day,
+   NDR.ioc_severity,
+   NDR.Message_Identifier,
+   NDR.FLOW_Count,
+   NDR.raw,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.timestamp),CHR(10)) timestamps,
+   NDR.protocol,
+   NDR.app_protocol,
+   NDR.src_ip,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.src_port),',') src_port_list,
+   NDR.dest_ip,
+   NDR.dest_port,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.web_hostname),',') web_hostname_list,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.flow_id),',') flow_ids,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.flow_risk),',') flow_risks,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.ids_description),',') ids_description_list, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.ids_id),',') ids_id_list,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.ids_msg),',') ids_msg_list,
+   REPLACE(REPLACE(LTRIM(ARRAY_JOIN(ARRAY_AGG(NDR.model_dga_prediction),','),','),',,',','),',,',',') model_dga_predictions,
+   REPLACE(REPLACE(LTRIM(ARRAY_JOIN(ARRAY_AGG(NDR.model_epa_confidence),','),','),',,',','),',,',',') model_epa_confidence_list,
+   NDR.src_mac,
+   NDR.dest_mac,
+   SUM(CAST(NDR.client_to_server_bytes AS BIGINT)) Total_client_to_Server_bytes,
+   SUM(CAST(NDR.client_to_server_duration AS BIGINT)) Total_client_to_server_duration,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.client_to_server_tcp_flags),',') client_to_server_tcp_flags,
+   SUM(CAST(NDR.server_to_client_bytes AS BIGINT)) Total_server_to_client_bytes,
+   SUM(CAST(NDR.server_to_client_duration AS BIGINT)) Total_server_to_client_duration,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.server_to_client_tcp_flags),',') server_to_client_tcp_flags,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT NDR.community_id),',') community_id_list,
+   NDR.dest_location_as_number,
+   NDR.dest_location_country_code,
+   NDR.dest_location_as_name,
+   NDR.dest_location_continent,
+   NDR.dest_location_country_name,
+   NDR.dest_location_territory,
+   NDR.dest_location_city,
+   NDR.dest_location_latitude,
+   NDR.dest_location_longitude,
+
+   -- XDR data --
+   CASE WHEN XDR.meta_hostname > '' THEN 'Managed with XDR_Installed' ELSE CASE WHEN NDR.src_mac > '' THEN 'NOT Managed' ELSE '' END END XDR_Enabled,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_hostname),',') meta_hostname, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_os_platform),',') os_platform,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_endpoint_type),',') endpoint_type, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_username),',') username
+FROM NDR_Data NDR 
+   LEFT JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(NDR.src_mac) 
+      -- Include the Stream_Ingest_date match to the NDR.Day info to determine if XDR was installed at the time of the NDR data or not
+      AND XDR.stream_ingest_date = NDR.Day
+GROUP BY 1,2,3,4,5,6, 8,9,10, 12,13, 22,23, 31,32,33,34,35,36,37,38,39,40
+),
+
+-- CHARACTER CODES
+-- CHR(10071)   ALERT❗ 
+-- CHR(9888)    CAUTION ⚠
+-- CHR(128712)  INFO 🛈
+
+NDR_LIST AS (
+-- Message Identifier and seperator
+SELECT NDR2.day day, NDR2.message_identifier id, Loop.x row_num, 
+   CASE 
+      WHEN Loop.X = 1 THEN '═════ Sensor ID: '||NDR2.Sensor_ID||' ═════'||RPAD('',100,'═')
+      ELSE 'Message ID: '||NDR2.message_identifier||
+         CASE
+            WHEN NDR2.FLOW_Count = '1' THEN ' — This detection record contains a single network flow record.'
+            ELSE ' — This detection consisted of '||NDR2.FLOW_Count||' network flow records.' 
+         END
+   END "Detection record details"
+FROM NDR_Grouped_Flow NDR2, UNNEST(SEQUENCE(1,2)) AS Loop(x)
+
+-- Date and FLOW Records
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 3 row_num, 'Detection Date: '||NDR2.day 
+FROM NDR_Grouped_Flow NDR2
+
+-- Severity message --
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 4 row_num,  
+   CASE 
+      WHEN CAST(NDR2.ioc_severity AS INTEGER) < 4 THEN CHR(128712)||' This was a (LOW) severity '||NDR2.ioc_severity||' detection. This would not be investigated automatically.'
+      WHEN CAST(NDR2.ioc_severity AS INTEGER) < 6 THEN CHR(9888)||' (CAUTION) This was a (MEDIUM) severity '||NDR2.ioc_severity||' detection. This would not be investigated automatically. If you think this is a threat please create a ticket with the MDR team.'
+      WHEN CAST(NDR2.ioc_severity AS INTEGER) < 8 THEN CHR(10071)||'(ALERT) This was a (MEDIUM) severity '||NDR2.ioc_severity||' detection. An Investigation(Case) was created.' 
+      ELSE CHR(10071)||'(ALERT) This was a (HIGH) severity '||NDR2.ioc_severity||' detection. An Investigation(Case) was created.' 
+   END 
+FROM NDR_Grouped_Flow NDR2
+
+-- Destination Location 
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 5 row_num, CHR(128712)||' Geo Location of remote device: '||NDR2.dest_location_as_name||
+   ' is located in '||NDR2.dest_location_country_name||', in the city of '||NDR2.dest_location_city||', '||NDR2.dest_location_territory
+FROM NDR_Grouped_Flow NDR2 WHERE NDR2.dest_location_as_number > ''
+
+-- Device Info --
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 6 row_num, 
+   CASE
+      WHEN NDR2.meta_hostname > '' THEN 'The device is '||NDR2.XDR_Enabled
+      ELSE CHR(10071)||'(ALERT) The device is '||NDR2.XDR_Enabled
+   END || '. MAC address: '||NDR2.src_mac||' using IP Address '||NDR2.src_ip||' was communications were over '||NDR2.protocol||' using the '||NDR2.app_protocol||' application protocol. '
+FROM NDR_Grouped_Flow NDR2
+   
+-- Managed or unmanged device
+UNION ALL 
+SELECT NDR2.day day, NDR2.message_identifier id, 7 row_num, 'Device details: '||NDR2.meta_hostname||' operating system: '||NDR2.os_platform||' type:'||NDR2.endpoint_type||' user: '||NDR2.username 
+FROM NDR_Grouped_Flow NDR2 WHERE NDR2.meta_hostname > ''
+
+-- FLOW RISK ANALYSIS  ALL Flow risks are CAUTION
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 8 row_num, 
+   CHR(9888)||' (CAUTION) FLOW RISK: '||REPLACE(ELEMENT_AT(ARRAY_DISTINCT(SPLIT(NDR2.flow_risks,',')),F.x),CHR(34),'')||' - '||
+   CASE 
+      WHEN (SELECT NDPI_Flow_Risks.Description FROM NDPI_Flow_Risks WHERE NDPI_Flow_Risks.Flow_risk = REPLACE(ELEMENT_AT(ARRAY_DISTINCT(SPLIT(NDR2.flow_risks,',')),F.x),CHR(34),'')) > '' 
+         THEN (SELECT NDPI_Flow_Risks.Description FROM NDPI_Flow_Risks WHERE NDPI_Flow_Risks.Flow_risk = REPLACE(ELEMENT_AT(ARRAY_DISTINCT(SPLIT(NDR2.flow_risks,',')),F.x),CHR(34),''))
+      ELSE 'No Description Found'
+   END
+FROM NDR_Grouped_Flow NDR2, UNNEST(SEQUENCE(1,CARDINALITY(ARRAY_DISTINCT(SPLIT(NDR2.flow_risks,','))))) AS F(x)
+WHERE REPLACE(ELEMENT_AT(ARRAY_DISTINCT(SPLIT(NDR2.flow_risks,',')),1),CHR(34),'') > ''
+
+-- IDS detections ALL IDS detections are ALERT
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 9 row_num, CHR(10071)||'(ALERT) IDS Detection: '||ids_description_list||' - '||ids_msg_list||' ID: '||ids_id_list 
+FROM NDR_Grouped_Flow NDR2 WHERE ids_description_list > ''
+
+-- DGA Predictions ALL DGA preditions are CAUTION
+UNION ALL 
+SELECT NDR2.day day, NDR2.message_identifier id, 10 row_num,CHR(9888)||' (CAUTION) DGA ML Analysis: Domain Generation Algorithm ML evaluation was run on '||
+   CAST(CARDINALITY(SPLIT(NDR2.model_dga_predictions,','))AS VARCHAR)||' Flows. Probability ('||REPLACE(NDR2.model_dga_predictions,',',', ')||')' 
+FROM NDR_Grouped_Flow NDR2 
+WHERE model_dga_predictions > ''
+
+-- EPA Predictions BENIGN EPA are INFO all others are ALERT
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 11 row_num, 
+   CASE
+      WHEN REPLACE(ELEMENT_AT(SPLIT(NDR2.model_epa_confidence_list,','),EPA.x),CHR(34),'') LIKE 'Benign%'
+         THEN CHR(128712)||' (INFO) EPA ML Analysis: '||REPLACE(REPLACE(ELEMENT_AT(SPLIT(NDR2.model_epa_confidence_list,','),EPA.x),CHR(34),''),'-','Probability: ')
+      ELSE CHR(10071)||'(ALERT) EPA ML Analysis: '||REPLACE(REPLACE(ELEMENT_AT(SPLIT(NDR2.model_epa_confidence_list,','),EPA.x),CHR(34),''),'-','- Probability: ')
+   END
+FROM NDR_Grouped_Flow NDR2, UNNEST(SEQUENCE(1,CARDINALITY(SPLIT(NDR2.model_epa_confidence_list,',')))) AS EPA(x)
+WHERE model_epa_confidence_list > ''
+-- Seperator
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 12 row_num, '----- CLIENT '||NDR2.src_ip||' and SERVER '||NDR2.dest_ip||' Communications -----' FROM NDR_Grouped_Flow NDR2
+
+-- Client Device details
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 13 row_num, 'Client MAC address of '||NDR2.src_mac||' at source IP: '||NDR2.src_ip||' communicated over the following ports: ('||REPLACE(NDR2.src_port_list,',',', ')||')' FROM NDR_Grouped_Flow NDR2
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 14 row_num, 'Client to Server Coms: The client sent a total of '||
+   CAST(FORMAT('%.2f',CAST(NDR2.Total_client_to_Server_bytes AS DOUBLE)/1024) AS VARCHAR)||'(KB) to the destination server. Total communication time was '||
+   REPLACE(CAST(PARSE_DURATION(CAST(NDR2.Total_client_to_server_duration/1000 AS VARCHAR)||'ms') AS VARCHAR),' ',' days and ')||' (HH:MM:SS). Client to Server TCP Flags: ('||ARRAY_JOIN(ARRAY_DISTINCT(SPLIT(NDR2.client_to_server_tcp_flags,',')),',')||')'
+FROM NDR_Grouped_Flow NDR2
+
+-- Server Device details
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 15 row_num, 'Destination MAC Address of '||NDR2.dest_mac||' using destination IP '||NDR2.dest_ip||' listening on port '||NDR2.dest_port||'. '||
+   CASE 
+      WHEN NDR2.web_hostname_list > '' THEN ' Web Hostname: '||NDR2.web_hostname_list
+      ELSE 'No web hostname was identified'
+   END
+FROM NDR_Grouped_Flow NDR2
+UNION ALL
+SELECT NDR2.day day, NDR2.message_identifier id, 16 row_num, 'Server to Client Coms: The server sent a total of '||
+   CAST(FORMAT('%.2f',CAST(NDR2.Total_server_to_client_bytes AS DOUBLE)/1024) AS VARCHAR)||'(KB) to the source client. Total communication time was '||
+   REPLACE(CAST(PARSE_DURATION(CAST(NDR2.Total_server_to_client_duration/1000 AS VARCHAR)||'ms') AS VARCHAR),' ',' days and ')||' (HH:MM:SS). Server to Client TCP Flags: ('||ARRAY_JOIN(ARRAY_DISTINCT(SPLIT(NDR2.server_to_client_tcp_flags,',')),',')||')'
+FROM NDR_Grouped_Flow NDR2
+)
+
+SELECT "Detection record details" FROM NDR_LIST ORDER BY NDR_LIST.day DESC, NDR_List.id DESC, NDR_List.row_num ASC
