@@ -1,0 +1,69 @@
+-- NAME:        NDR - Protocl Report
+-- CATEGORY:    NDR
+-- DESCRIPTION: Detection for identifying protocols used and how often
+--              NOTE: avg_pcr is the Producer Consumer Ratio (PCR) (-1 Pure Push to +1 Pure Pull)
+--              NOTE: mac_addresses is a list of the top 100 macs by total bytes in the monitored flows for the protocol
+-- SOURCE:      Data Lake
+
+-- VARIABLE:    $$Application Protocol$$ STRING
+-- VARIABLE:    $$Network Protocol$$     STRING
+-- VARIABLE:    $$MAC Address$$          STRING
+-- VARIABLE:    $$meta_hostname$$        DEVICE_NAME
+-- VARIABLE:    $$Sensor ID$$            STRING
+
+-- VERSION: 1.1
+-- Change Log: Add filter for Sensor ID
+
+WITH NDR_Data AS (
+   SELECT
+      CAST(JSON_EXTRACT(raw, '$.sensor_id') AS VARCHAR) Sensor_ID,
+      CAST(JSON_EXTRACT(raw,'$.ingest_date') AS VARCHAR) Day,
+      CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) Report_Name,
+      CAST(JSON_EXTRACT(raw,'$.description') AS VARCHAR) Description,
+
+      -- Detection Context
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].app_protocol') AS VARCHAR) app_protocol,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].net_protocol') AS VARCHAR) net_protocol,
+      FORMAT('%,.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].download_bytes') AS DOUBLE)/(1024*1024)) "download_bytes (MB)",
+      FORMAT('%,.2f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].upload_bytes') AS DOUBLE)/(1024*1024)) "upload_bytes (MB)",
+      FORMAT('%,.0f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].num_flows') AS DOUBLE)) num_flows,
+      FORMAT('%,.4f',CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].avg_pcr') AS DOUBLE)) avg_pcr,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].mac_addresses') AS VARCHAR) mac_addresses,
+      CAST(JSON_EXTRACT(raw,'$.detection_context['||CAST(A.x AS VARCHAR)||'].mac_count') AS VARCHAR) mac_count	
+   FROM mdr_ioc_all, UNNEST(SEQUENCE(0,JSON_ARRAY_LENGTH(JSON_EXTRACT(raw,'$.detection_context'))-1)) AS A(x)
+   WHERE ioc_worker_id = 'worker_ndr'
+      AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'protocolCount'
+   )
+   
+SELECT 
+   Sensor_ID,
+   Day, 
+   net_protocol, 
+   app_protocol, 
+   CASE WHEN avg_pcr = 'null' THEN '' ELSE avg_pcr END avg_pcr, 
+   "download_bytes (MB)", 
+   "upload_bytes (MB)", 
+   num_flows,
+   mac_count Devices,
+   REPLACE(mac_addresses,',',CHR(10)) mac_addresses,
+
+   -- Here we will take a closer look at the top contributor to the activity by looking up the first MAC_address in the list vs XDR Data
+   ELEMENT_AT(SPLIT(mac_addresses,','),1) "Examine_First_Entry ->",
+      -- XDR data --
+   CASE WHEN XDR.meta_hostname > '' THEN 'XDR_Installed' ELSE CASE WHEN mac_addresses > '' THEN 'NOT Managed' ELSE '' END END XDR_Enabled,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_hostname),CHR(10)) meta_hostname, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_os_platform),CHR(10)) os_platform,
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_endpoint_type),CHR(10)) endpoint_type, 
+   ARRAY_JOIN(ARRAY_AGG(DISTINCT XDR.meta_username),CHR(10)) username
+
+FROM NDR_Data 
+   LEFT JOIN xdr_data XDR ON LOWER(XDR.meta_mac_address) = LOWER(ELEMENT_AT(SPLIT(mac_addresses,','),1))
+   -- Include the Stream_Ingest_date match to the NDR_Data.Day info to determine if XDR was installed at the time of the NDR data or not
+   AND XDR.stream_ingest_date = NDR_Data.Day
+WHERE CASE WHEN app_protocol > '' THEN LOWER(app_protocol) LIKE LOWER('%$$Application Protocol$$%') ELSE CASE WHEN '$$Application Protocol$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN net_protocol > '' THEN LOWER(net_protocol) LIKE LOWER('%$$Network Protocol$$%') ELSE CASE WHEN '$$Network Protocol$$%' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN mac_addresses > '' THEN LOWER(mac_addresses) LIKE LOWER('%$$MAC Address$$%') ELSE CASE WHEN '$$MAC Address$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN XDR.meta_hostname > '' THEN LOWER(XDR.meta_hostname) LIKE LOWER('%$$meta_hostname$$%') ELSE CASE WHEN '$$meta_hostname$$' = '%' THEN CAST('1' AS BOOLEAN) ELSE CAST('0' AS BOOLEAN) END END
+   AND CASE WHEN '$$Sensor ID$$' = '%' THEN CAST(1 AS BOOLEAN) ELSE Sensor_ID = '$$Sensor ID$$' END
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12  
+ORDER BY Day DESC, "download_bytes (MB)" DESC, "upload_bytes (MB)", net_protocol ASC, app_protocol ASC
