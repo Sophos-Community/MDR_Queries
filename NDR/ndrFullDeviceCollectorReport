@@ -18,7 +18,6 @@ WITH NDR_Data AS (
    WHERE ioc_worker_id = 'worker_ndr' 
       AND CAST(JSON_EXTRACT(raw, '$.name') AS VARCHAR) = 'topTalkers'
    )
-
 SELECT
    NDR.Sensor_ID,
    NDR.ip,
